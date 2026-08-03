@@ -68,6 +68,11 @@ import aiImageToolIconRaw from './assets/ai-image.svg?raw'
 import aiSlidesToolIconRaw from './assets/ai-slides.svg?raw'
 import annotationToolIconRaw from './assets/tool-comment.svg?raw'
 import {
+  sendTrackedWidgetMessage,
+  trackAnnotationCreated,
+  trackCanvasOpened
+} from './analytics.js'
+import {
   IS_COWART_WIDGET_BUILD,
   downloadCowartFile,
   hasCowartWidgetBridge,
@@ -1265,13 +1270,16 @@ function dataUrlToImageContent(dataUrl, meta = {}) {
 }
 
 function followUpSender() {
+  let sendMessage = null
   if (typeof window.cowartMcp?.sendFollowUpMessage === 'function') {
-    return (message) => window.cowartMcp.sendFollowUpMessage(message)
+    sendMessage = (message) => window.cowartMcp.sendFollowUpMessage(message)
+  } else if (typeof window.openai?.sendFollowUpMessage === 'function') {
+    sendMessage = (message) => window.openai.sendFollowUpMessage(message)
   }
-  if (typeof window.openai?.sendFollowUpMessage === 'function') {
-    return (message) => window.openai.sendFollowUpMessage(message)
-  }
-  return null
+  if (!sendMessage) return null
+
+  return (message, analyticsContext = {}) =>
+    sendTrackedWidgetMessage(sendMessage, message, analyticsContext)
 }
 
 function cowartHostCapabilities() {
@@ -1337,7 +1345,10 @@ async function sendAnnotationEditRequest(editor, imageShapeId) {
     )
   }
 
-  return sender({ prompt, content })
+  return sender(
+    { prompt, content },
+    { promptType: 'annotation_edit', hasReference: true }
+  )
 }
 
 async function sendAnnotationHtmlRequest(editor, imageShapeId) {
@@ -1386,7 +1397,10 @@ async function sendAnnotationHtmlRequest(editor, imageShapeId) {
     )
   }
 
-  return sender({ prompt, content })
+  return sender(
+    { prompt, content },
+    { promptType: 'annotation_html', aiType: 'html', hasReference: true }
+  )
 }
 
 async function waitForHtmlDraftDocument(shapeId) {
@@ -2339,7 +2353,15 @@ async function sendAiSlidesAnnotationEditRequest(editor, slidesShapeId) {
         })
       )
     }
-    return await sender({ prompt, content })
+    return await sender(
+      { prompt, content },
+      {
+        promptType: 'slides_annotation_edit',
+        aiType: 'slides',
+        hasReference: true,
+        pageCount: sourceItems.length
+      }
+    )
   } catch (error) {
     editor.deleteShapes([targetSlidesShapeId])
     await saveCowartCanvasSnapshot(editor.store.getStoreSnapshot(), { protectImageRecords: true })
@@ -2444,7 +2466,14 @@ async function sendHtmlDraftAnnotationRequest(editor, draftShapeId, mode) {
     )
   }
 
-  return sender({ prompt, content })
+  return sender(
+    { prompt, content },
+    {
+      promptType: mode === 'edit' ? 'html_annotation_edit' : 'html_annotation_image',
+      aiType: mode === 'edit' ? 'html' : 'image',
+      hasReference: true
+    }
+  )
 }
 
 function clampNumber(value, min, max) {
@@ -2675,7 +2704,14 @@ async function sendAiImageGenerationRequest({ holderShape, userPrompt, reference
     }
   }
 
-  return sender({ prompt, content })
+  return sender(
+    { prompt, content },
+    {
+      promptType: 'ai_image',
+      aiType: 'image',
+      hasReference: imageReferences.length > 0
+    }
+  )
 }
 
 async function sendAiDraftGenerationRequest({ holderShape, userPrompt, referenceFiles = [] }) {
@@ -2731,7 +2767,14 @@ async function sendAiDraftGenerationRequest({ holderShape, userPrompt, reference
     }
   }
 
-  return sender({ prompt, content })
+  return sender(
+    { prompt, content },
+    {
+      promptType: 'ai_html',
+      aiType: 'html',
+      hasReference: imageReferences.length > 0
+    }
+  )
 }
 
 async function sendAiSlidesGenerationRequest({ slidesShape, pageCount, userPrompt, referenceFiles = [] }) {
@@ -2788,7 +2831,15 @@ async function sendAiSlidesGenerationRequest({ slidesShape, pageCount, userPromp
     }
   }
 
-  return sender({ prompt, content })
+  return sender(
+    { prompt, content },
+    {
+      promptType: 'ai_slides',
+      aiType: 'slides',
+      hasReference: imageReferences.length > 0,
+      pageCount
+    }
+  )
 }
 
 class CowartAnnotationTool extends StateNode {
@@ -2928,6 +2979,7 @@ class CowartAnnotationPointing extends StateNode {
       }
     ])
 
+    trackAnnotationCreated()
     startEditingAnnotationArrowLabel(this.editor, this.arrowId)
   }
 
@@ -5698,6 +5750,7 @@ export default function App() {
   }, [])
 
   const handleMount = useCallback((editor) => {
+    trackCanvasOpened()
     window.__cowartEditor = editor
     window.__cowartSelection = () => getCowartSelection(editor)
     window.__cowartViewState = () => getCowartViewState(editor)
