@@ -18,13 +18,14 @@ export function inlineWidget({
   html,
   css = "",
   js = "",
+  appVersion,
   initialDisplayMode = "",
   cssPlaceholder = "/* __COWART_WIDGET_CSS__ */",
   jsPlaceholder = "/* __COWART_WIDGET_JS__ */",
 }) {
   return injectMcpHostBridge(
     html.replace(cssPlaceholder, () => css).replace(jsPlaceholder, () => js),
-    { initialDisplayMode },
+    { appVersion, initialDisplayMode },
   );
 }
 
@@ -89,7 +90,7 @@ export function registerWidgetResource(
   );
 }
 
-function injectMcpHostBridge(html, { initialDisplayMode = "" } = {}) {
+function injectMcpHostBridge(html, { appVersion, initialDisplayMode = "" } = {}) {
   const bridge = [
     '<script id="cowartInitialDisplayMode">',
     `window.__COWART_INITIAL_DISPLAY_MODE__=${JSON.stringify(initialDisplayMode)};`,
@@ -98,7 +99,7 @@ function injectMcpHostBridge(html, { initialDisplayMode = "" } = {}) {
     escapeInlineScript(mcpAppsGlobalScript()),
     "</script>",
     '<script id="cowartMcpHostBridge">',
-    mcpHostBridgeScript(),
+    mcpHostBridgeScript(appVersion),
     "</script>",
   ].join("\n");
 
@@ -160,7 +161,11 @@ function escapeInlineScript(source) {
   return source.replaceAll("</script", "<\\/script").replaceAll("</SCRIPT", "<\\/SCRIPT");
 }
 
-function mcpHostBridgeScript() {
+function mcpHostBridgeScript(appVersion) {
+  if (typeof appVersion !== "string" || !appVersion.trim()) {
+    throw new Error("Cowart widget bridge requires the plugin version.");
+  }
+
   return `(() => {
   "use strict";
 
@@ -345,7 +350,7 @@ function mcpHostBridgeScript() {
 
   try {
     mcpApp = new apps.App(
-      { name: "cowart", version: "0.1.6" },
+      { name: "cowart", version: ${JSON.stringify(appVersion)} },
       { availableDisplayModes: ["inline", "fullscreen"] },
       { autoResize: true },
     );

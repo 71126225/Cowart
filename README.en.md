@@ -21,58 +21,37 @@ Cowart is a native infinite-canvas widget plugin for Codex. It brings a tldraw-p
 Send the following message to Codex:
 
 ```text
-Please install the Cowart Codex plugin from https://github.com/zhongerxin/cowart.git.
-Clone the repository into ~/plugins/cowart, verify that .codex-plugin/plugin.json exists,
-add the plugin to the personal marketplace, run codex plugin marketplace add ~,
-then run codex plugin add cowart@personal.
-After installing, validate the plugin and tell me whether I should start a new conversation to load the new skills and MCP tools.
+Please install the Cowart Codex plugin through the Git marketplace bundled with its repository.
+First run codex plugin marketplace add zhongerxin/Cowart --ref main,
+then run codex plugin add cowart@cowart-github and use codex plugin list to confirm it is enabled.
+Do not clone the repository into the personal marketplace. When installation finishes, tell me to
+start a new task so Codex loads Cowart's new skills and MCP tools.
 ```
 
 ### Manual Install
 
-Clone the plugin into the default location referenced by the Codex personal marketplace:
+First register the Cowart Git repository as a Codex marketplace:
 
 ```bash
-mkdir -p ~/plugins
-git clone https://github.com/zhongerxin/cowart.git ~/plugins/cowart
-cd ~/plugins/cowart
-npm install
-npm run build
+codex plugin marketplace add zhongerxin/Cowart --ref main
 ```
 
-Make sure `~/.agents/plugins/marketplace.json` contains a Cowart entry:
-
-```json
-{
-  "name": "personal",
-  "interface": {
-    "displayName": "Personal"
-  },
-  "plugins": [
-    {
-      "name": "cowart",
-      "source": {
-        "source": "local",
-        "path": "./plugins/cowart"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    }
-  ]
-}
-```
-
-Then register the personal marketplace and install the plugin:
+Then install Cowart from that marketplace and verify it:
 
 ```bash
-codex plugin marketplace add ~
-codex plugin add cowart@personal
+codex plugin add cowart@cowart-github
+codex plugin list
 ```
 
-After installing, start a new Codex conversation so the new skills and MCP tools are loaded cleanly.
+If `cowart-github` is already registered, skip the first `marketplace add` command. After installing, start a new Codex task so the new skills and MCP tools are loaded cleanly.
+
+Codex automatically checks this Git marketplace when its plugin system starts and refreshes the installed Cowart plugin when the remote `main` branch changes. To check for an update immediately, run:
+
+```bash
+codex plugin marketplace upgrade cowart-github
+```
+
+Start a new task after the update as well.
 
 ## Usage
 

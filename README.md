@@ -21,58 +21,37 @@ English README: [README.en.md](README.en.md)
 把下面这段发给 Codex：
 
 ```text
-请从 https://github.com/zhongerxin/cowart.git 安装 Cowart Codex 插件。
-请 clone 仓库到 ~/plugins/cowart，确认 .codex-plugin/plugin.json 存在，
-把插件加入 personal marketplace，先运行 codex plugin marketplace add ~，
-再运行 codex plugin add cowart@personal。
-安装后请校验插件，并告诉我是否需要开启一个新对话来加载新技能和 MCP 工具。
+请通过 Cowart 仓库自带的 Git marketplace 安装 Cowart Codex 插件。
+先运行 codex plugin marketplace add zhongerxin/Cowart --ref main，
+再运行 codex plugin add cowart@cowart-github，并用 codex plugin list 确认插件已启用。
+不要把仓库 clone 到 personal marketplace。安装完成后请告诉我开启一个新任务，
+以便加载 Cowart 的新技能和 MCP 工具。
 ```
 
 ### 手动安装
 
-推荐把插件 clone 到 Codex personal marketplace 默认会引用的位置：
+先把 Cowart 的 Git 仓库注册为 Codex marketplace：
 
 ```bash
-mkdir -p ~/plugins
-git clone https://github.com/zhongerxin/cowart.git ~/plugins/cowart
-cd ~/plugins/cowart
-npm install
-npm run build
+codex plugin marketplace add zhongerxin/Cowart --ref main
 ```
 
-确保 `~/.agents/plugins/marketplace.json` 中有 Cowart 条目：
-
-```json
-{
-  "name": "personal",
-  "interface": {
-    "displayName": "Personal"
-  },
-  "plugins": [
-    {
-      "name": "cowart",
-      "source": {
-        "source": "local",
-        "path": "./plugins/cowart"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    }
-  ]
-}
-```
-
-然后先注册 personal marketplace，再安装插件：
+再从这个 marketplace 安装并检查 Cowart：
 
 ```bash
-codex plugin marketplace add ~
-codex plugin add cowart@personal
+codex plugin add cowart@cowart-github
+codex plugin list
 ```
 
-安装后建议开启一个新的 Codex 对话，让新的 skill 和 MCP 工具完整加载。
+如果 `cowart-github` 已经注册，可以跳过第一条 `marketplace add` 命令。安装后请开启一个新的 Codex 任务，让新的 skill 和 MCP 工具完整加载。
+
+Codex 会在启动插件系统时自动检查这个 Git marketplace，并在远程 `main` 分支发生变化后刷新已安装的 Cowart。需要立即检查更新时，可以手动运行：
+
+```bash
+codex plugin marketplace upgrade cowart-github
+```
+
+更新完成后同样建议开启一个新任务。
 
 ## 使用
 

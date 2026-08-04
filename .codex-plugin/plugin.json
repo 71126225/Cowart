@@ -8,6 +8,8 @@
     "url": "https://www.jiqiren.ai"
   },
   "homepage": "https://www.jiqiren.ai",
+  "repository": "https://github.com/zhongerxin/Cowart",
+  "license": "MIT",
   "keywords": [
     "canvas",
     "tldraw",
