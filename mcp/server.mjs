@@ -941,6 +941,7 @@ function registerCowartWidget(mcpServer) {
     frameDomains: COWART_FRAME_DOMAINS,
     html: async () => inlineWidget({
       html: await cowartStaticHtml(),
+      appVersion: pluginManifest.version,
       initialDisplayMode: DEFAULT_DISPLAY_MODE,
     }),
   });
