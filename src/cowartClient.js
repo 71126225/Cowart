@@ -9,6 +9,7 @@ const TOOL_SAVE_VIEW_STATE = 'save_cowart_view_state'
 const TOOL_SAVE_REFERENCE_IMAGE = 'save_cowart_reference_image'
 const TOOL_READ_PAGE_ASSET = 'read_cowart_page_asset'
 const TOOL_DOWNLOAD_FILE = 'download_cowart_file'
+const TOOL_COPY_IMAGE_TO_CLIPBOARD = 'copy_cowart_image_to_clipboard'
 const TOOL_INSERT_HTML_DRAFT = 'insert_cowart_html_draft'
 const WIDGET_PAYLOAD_TIMEOUT_MS = 5000
 
@@ -202,6 +203,14 @@ export async function downloadCowartFile(download) {
   }
 
   return callCowartServerTool(TOOL_DOWNLOAD_FILE, download)
+}
+
+export async function copyCowartImageToClipboard(image) {
+  if (!hasCowartWidgetBridge()) {
+    throw new Error('当前 Cowart 画布没有可用的系统剪贴板桥。')
+  }
+
+  return callCowartServerTool(TOOL_COPY_IMAGE_TO_CLIPBOARD, image)
 }
 
 export async function updateCowartHtmlDraft({ draftShapeId, htmlContent }) {

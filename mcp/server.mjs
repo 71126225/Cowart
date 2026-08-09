@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, platform, tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 
 import { registerAppTool } from "@modelcontextprotocol/ext-apps/server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -47,7 +49,10 @@ const TOOL_INSERT_HTML_DRAFT = "insert_cowart_html_draft";
 const TOOL_SAVE_REFERENCE_IMAGE = "save_cowart_reference_image";
 const TOOL_READ_PAGE_ASSET = "read_cowart_page_asset";
 const TOOL_DOWNLOAD_FILE = "download_cowart_file";
+const TOOL_COPY_IMAGE_TO_CLIPBOARD = "copy_cowart_image_to_clipboard";
 const TOOL_TRACK_ANALYTICS = "track_cowart_analytics_event";
+
+const execFileAsync = promisify(execFile);
 
 const PAGE_ID_PREFIX = "page:";
 const COWART_WIDGET_URI = "ui://widget/cowart/canvas.html";
@@ -929,6 +934,99 @@ async function downloadCowartFile(args = {}) {
   };
 }
 
+async function copyCowartImageToClipboard(args = {}) {
+  const dataUrl = nonEmptyString(args.dataUrl);
+  const dataBase64 = nonEmptyString(args.dataBase64);
+  let buffer = null;
+  let mimeType = nonEmptyString(args.mimeType) || "image/png";
+
+  if (dataUrl) {
+    const parsed = parseDownloadDataUrl(dataUrl);
+    buffer = parsed.buffer;
+    mimeType = nonEmptyString(args.mimeType) || parsed.mimeType;
+  } else if (dataBase64) {
+    buffer = Buffer.from(dataBase64, "base64");
+  } else {
+    throw new Error("dataUrl or dataBase64 is required.");
+  }
+
+  if (!buffer.length) throw new Error("Cowart clipboard image data is empty.");
+  if (mimeType !== "image/png") throw new Error(`Cowart clipboard only supports image/png, received ${mimeType}.`);
+  if (buffer.length < 8 || !buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    throw new Error("Cowart clipboard data is not a valid PNG image.");
+  }
+
+  const dimensions = readPngDimensions(buffer);
+  if (args.dryRun !== true) {
+    await writePngToSystemClipboard(buffer);
+  }
+
+  return {
+    ok: true,
+    mimeType,
+    fileSize: buffer.length,
+    width: dimensions.width,
+    height: dimensions.height,
+    platform: platform(),
+    dryRun: args.dryRun === true,
+  };
+}
+
+function readPngDimensions(buffer) {
+  if (buffer.length < 24 || buffer.toString("ascii", 12, 16) !== "IHDR") {
+    throw new Error("Cowart clipboard PNG is missing its IHDR header.");
+  }
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20),
+  };
+}
+
+async function writePngToSystemClipboard(buffer) {
+  const systemPlatform = platform();
+  const tempDir = await mkdtemp(join(tmpdir(), "cowart-clipboard-"));
+  const pngPath = join(tempDir, "cowart-copy.png");
+
+  try {
+    await writeFile(pngPath, buffer);
+    if (systemPlatform === "darwin") {
+      const script = [
+        "on run argv",
+        "set imageFile to POSIX file (item 1 of argv)",
+        "set the clipboard to (read imageFile as «class PNGf»)",
+        "end run",
+      ].join("\n");
+      await execFileAsync("/usr/bin/osascript", ["-e", script, pngPath], { timeout: 10000 });
+      return;
+    }
+
+    if (systemPlatform === "win32") {
+      const script = [
+        "Add-Type -AssemblyName System.Windows.Forms",
+        "Add-Type -AssemblyName System.Drawing",
+        "$image = [System.Drawing.Image]::FromFile($env:COWART_CLIPBOARD_PNG_PATH)",
+        "try { [System.Windows.Forms.Clipboard]::SetImage($image) } finally { $image.Dispose() }",
+      ].join("; ");
+      await execFileAsync(
+        "powershell.exe",
+        ["-NoProfile", "-STA", "-Command", script],
+        {
+          env: { ...process.env, COWART_CLIPBOARD_PNG_PATH: pngPath },
+          timeout: 10000,
+        },
+      );
+      return;
+    }
+
+    throw new Error(`Cowart system clipboard is not supported on ${systemPlatform}.`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Cowart system clipboard")) throw error;
+    throw new Error(`系统剪贴板写入失败：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 function registerCowartWidget(mcpServer) {
   registerWidgetResource(mcpServer, {
     name: "cowart-canvas-widget",
@@ -1256,6 +1354,49 @@ function registerCowartStateTools(mcpServer) {
 }
 
 function registerCowartImageTools(mcpServer) {
+  registerAppTool(
+    mcpServer,
+    TOOL_COPY_IMAGE_TO_CLIPBOARD,
+    {
+      title: "Copy Cowart PNG to system clipboard",
+      description:
+        "Copy a PNG rendered by the Cowart widget to the local system clipboard when the widget iframe cannot use the browser Clipboard API.",
+      inputSchema: {
+        ...projectArgsSchema,
+        dataUrl: z.string().optional(),
+        dataBase64: z.string().optional(),
+        mimeType: z.literal("image/png").optional(),
+        dryRun: z.boolean().optional(),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      _meta: {
+        ui: {
+          visibility: ["app"],
+        },
+        "openai/widgetAccessible": true,
+      },
+    },
+    async (input = {}) => {
+      const result = await copyCowartImageToClipboard(input);
+      return {
+        content: [
+          {
+            type: "text",
+            text: result.dryRun
+              ? `Validated Cowart clipboard PNG (${result.width}x${result.height}).`
+              : `Copied Cowart PNG to the system clipboard (${result.width}x${result.height}).`,
+          },
+        ],
+        structuredContent: result,
+      };
+    },
+  );
+
   mcpServer.registerTool(
     TOOL_DOWNLOAD_FILE,
     {
