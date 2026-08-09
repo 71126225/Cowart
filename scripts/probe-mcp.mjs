@@ -40,6 +40,7 @@ try {
     "save_cowart_reference_image",
     "read_cowart_page_asset",
     "download_cowart_file",
+    "copy_cowart_image_to_clipboard",
     "get_cowart_selection",
     "insert_cowart_image",
     "insert_cowart_html_draft",
@@ -58,6 +59,10 @@ try {
   }
   if (analyticsTool?.annotations?.openWorldHint !== true) {
     throw new Error("Cowart analytics tool should declare its external GA4 side effect.");
+  }
+  const clipboardTool = tools.tools.find((tool) => tool.name === "copy_cowart_image_to_clipboard");
+  if (JSON.stringify(clipboardTool?._meta?.ui?.visibility) !== JSON.stringify(["app"])) {
+    throw new Error("Cowart clipboard tool should only be visible to the widget app.");
   }
 
   const projectDir = await mkdtemp(path.join(tmpdir(), "cowart-widget-probe-"));
@@ -120,6 +125,23 @@ try {
   });
   if (htmlAssetResult.structuredContent?.mimeType !== "text/html" || !htmlAssetResult.structuredContent?.dataBase64) {
     throw new Error("Cowart page asset tool did not return the expected html payload.");
+  }
+
+  const clipboardResult = await client.callTool({
+    name: "copy_cowart_image_to_clipboard",
+    arguments: {
+      projectDir,
+      dataBase64: pageAssetResult.structuredContent.dataBase64,
+      mimeType: "image/png",
+      dryRun: true,
+    },
+  });
+  if (
+    clipboardResult.structuredContent?.dryRun !== true ||
+    clipboardResult.structuredContent?.width !== 1 ||
+    clipboardResult.structuredContent?.height !== 1
+  ) {
+    throw new Error("Cowart clipboard tool did not validate the expected PNG payload.");
   }
 
   const downloadResult = await client.callTool({

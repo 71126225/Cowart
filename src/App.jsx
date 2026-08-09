@@ -74,6 +74,7 @@ import {
 } from './analytics.js'
 import {
   IS_COWART_WIDGET_BUILD,
+  copyCowartImageToClipboard,
   downloadCowartFile,
   hasCowartWidgetBridge,
   loadCowartCanvasState,
@@ -180,6 +181,7 @@ const ANNOTATION_EDIT_RELATED_TEXT_MARGIN = 120
 const ANNOTATION_EDIT_STATUS_RESET_MS = 2200
 const ANNOTATION_EDIT_COLORS = new Set(['red', 'yellow', 'orange'])
 const HTML_DRAFT_CAPTURE_DELAY_MS = 2000
+const HTML_DRAFT_ASSET_RETRY_DELAYS_MS = [0, 200, 600, 1400]
 const HTML_DRAFT_DOM_EDIT_LABEL = '编辑文本'
 const HTML_DRAFT_DOM_EDIT_DONE_LABEL = '完成编辑'
 const HTML_DRAFT_ANNOTATION_EDIT_LABEL = '按标注修改'
@@ -3048,25 +3050,44 @@ function CowartHtmlDraftEmbed({ shape }) {
   useEffect(() => {
     setHtmlSource(null)
     setLoadError(null)
-    const shouldReadPageAsset = draftAssetUrl && hasCowartWidgetBridge()
-    const browserSourceUrl = !shouldReadPageAsset && (draftAssetUrl || directHtmlUrl)
+    // Newly generated drafts already carry their complete HTML as a data URL. Prefer that local
+    // source so the first render does not depend on the MCP proxy becoming ready at the same time.
+    const shouldReadPageAsset = !directHtmlUrl && draftAssetUrl && hasCowartWidgetBridge()
+    const browserSourceUrl = directHtmlUrl || (!shouldReadPageAsset && draftAssetUrl)
     if (!shouldReadPageAsset && !browserSourceUrl) return undefined
 
     let isDisposed = false
 
+    async function readDraftAssetWithRetry() {
+      let lastError = null
+      for (const delay of HTML_DRAFT_ASSET_RETRY_DELAYS_MS) {
+        if (isDisposed) return null
+        if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay))
+        if (isDisposed) return null
+        try {
+          const pageAsset = await readCowartPageAsset(draftAssetUrl)
+          return blobFromBase64(pageAsset.dataBase64, pageAsset.mimeType).text()
+        } catch (error) {
+          lastError = error
+        }
+      }
+      throw lastError || new Error('HTML 草稿加载失败')
+    }
+
     const htmlSourcePromise = shouldReadPageAsset
-      ? readCowartPageAsset(draftAssetUrl).then((pageAsset) =>
-          blobFromBase64(pageAsset.dataBase64, pageAsset.mimeType).text()
-        )
+      ? readDraftAssetWithRetry()
       : window.fetch(browserSourceUrl).then((response) => {
           if (!response.ok) throw new Error(`HTML 草稿加载失败：${response.status}`)
           return response.text()
         })
 
     htmlSourcePromise
-      .then((htmlContent) => hasCowartWidgetBridge() ? hydrateCowartHtmlDraftLocalImages(htmlContent) : htmlContent)
       .then((htmlContent) => {
-        if (isDisposed) return
+        if (htmlContent === null) return null
+        return hasCowartWidgetBridge() ? hydrateCowartHtmlDraftLocalImages(htmlContent) : htmlContent
+      })
+      .then((htmlContent) => {
+        if (isDisposed || htmlContent === null) return
         setHtmlSource(htmlContent)
       })
       .catch((error) => {
@@ -3187,8 +3208,61 @@ const cowartShapeUtils = [CowartFrameShapeUtil, CowartEmbedShapeUtil]
 const cowartUiOverrides = {
   actions(editor, actions, helpers) {
     const defaultDownloadOriginal = actions['download-original']
+    const defaultCopyAsPng = actions['copy-as-png']
     return {
       ...actions,
+      'copy-as-png': {
+        ...defaultCopyAsPng,
+        async onSelect(source) {
+          // Codex widgets run inside an iframe where the host can deny the browser Clipboard API.
+          // Render in the widget, then hand the PNG to the local MCP process for the native write.
+          if (!hasCowartWidgetBridge()) {
+            return defaultCopyAsPng.onSelect(source)
+          }
+
+          let shapeIds = editor.getSelectedShapeIds()
+          if (shapeIds.length === 0) {
+            shapeIds = Array.from(editor.getCurrentPageShapeIds())
+          }
+          if (shapeIds.length === 0) return
+
+          try {
+            const onlyShape = shapeIds.length === 1 ? editor.getShape(shapeIds[0]) : null
+            let image
+            if (isCowartHtmlDraftEmbedShape(onlyShape)) {
+              const bounds = new Box(
+                0,
+                0,
+                Number(onlyShape.props?.w) || 1,
+                Number(onlyShape.props?.h) || 1
+              )
+              image = await renderCowartHtmlDraftCanvas(
+                onlyShape,
+                getAnnotationEditExportPixelRatio(bounds)
+              )
+            } else {
+              image = await editor.toImageDataUrl(shapeIds, { format: 'png' })
+            }
+            const result = await copyCowartImageToClipboard({
+              dataUrl: image.url,
+              mimeType: 'image/png'
+            })
+            helpers.addToast({
+              title: 'PNG 已复制',
+              description: `${result.width} × ${result.height}，可直接粘贴到其他应用。`,
+              severity: 'success'
+            })
+          } catch (error) {
+            console.error(error)
+            helpers.addToast({
+              id: 'copy-fail',
+              title: '复制失败',
+              description: error instanceof Error ? error.message : '无法复制图像。',
+              severity: 'error'
+            })
+          }
+        }
+      },
       'download-original': {
         ...defaultDownloadOriginal,
         async onSelect(source) {
